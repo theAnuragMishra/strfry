@@ -1,6 +1,16 @@
 #include "RelayServer.h"
 #include "jsonParseUtils.h"
 
+namespace {
+
+std::string normalizeClientMetricCommand(std::string_view cmd) {
+    if (cmd == "NEG-OPEN" || cmd == "NEG-MSG" || cmd == "NEG-CLOSE") return std::string(cmd);
+    if (cmd.starts_with("NEG-")) return "NEG-UNKNOWN";
+    return std::string(cmd);
+}
+
+}
+
 
 void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
     RelayServerCtx rsctx;
@@ -68,7 +78,7 @@ void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
                                 sendNoticeError(msg->connId, std::string("bad close: ") + e.what());
                             }
                         } else if (cmd.starts_with("NEG-")) {
-                            PROM_INC_CLIENT_MSG(cmd);
+                            PROM_INC_CLIENT_MSG(normalizeClientMetricCommand(cmd));
                             if (!cfg().relay__negentropy__enabled) throw herr("negentropy disabled");
 
                             try {

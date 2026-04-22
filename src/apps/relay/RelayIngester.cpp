@@ -1,6 +1,46 @@
 #include "RelayServer.h"
 #include "jsonParseUtils.h"
 
+#include <cctype>
+
+
+static std::string getMaybeEventId(const tao::json::value &v) {
+    try {
+        if (v.is_object() && v.at("id").is_string()) {
+            return v.at("id").get_string();
+        }
+    } catch (std::exception &) {}
+
+    return "?";
+}
+
+static bool startsWithJsonObject(std::string_view sv) {
+    for (unsigned char c : sv) {
+        if (::isspace(c)) continue;
+        return c == '{';
+    }
+
+    return false;
+}
+
+static bool eventJsonHasProtectedTag(const tao::json::value &eventJson) {
+    try {
+        const auto &tags = eventJson.at("tags");
+        if (!tags.is_array()) return false;
+
+        for (const auto &tagj : tags.get_array()) {
+            if (!tagj.is_array()) continue;
+            const auto &tag = tagj.get_array();
+            if (tag.size() == 0 || !tag[0].is_string()) continue;
+            if (tag[0].get_string() == "-") return true;
+        }
+    } catch (std::exception &) {
+        // Ignore malformed embedded events and fall back to allowing repost.
+    }
+
+    return false;
+}
+
 
 void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
     RelayServerCtx rsctx;
@@ -32,7 +72,7 @@ void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
                             try {
                                 ingesterProcessEvent(txn, rsctx, msg->connId, msg->ipAddr, arr[1], writerMsgs);
                             } catch (std::exception &e) {
-                                sendOKResponse(msg->connId, arr[1].is_object() && arr[1].at("id").is_string() ? arr[1].at("id").get_string() : "?",
+                                sendOKResponse(msg->connId, getMaybeEventId(arr[1]),
                                                false, std::string("invalid: ") + e.what());
                                 if (cfg().relay__logging__invalidEvents) LI << "Rejected invalid event: " << e.what();
                             }
@@ -43,7 +83,7 @@ void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
                             try {
                                 ingesterProcessAuth(rsctx, msg->connId, arr[1]);
                             } catch (std::exception &e) {
-                                sendOKResponse(msg->connId, arr[1].is_object() && arr[1].at("id").is_string() ? arr[1].at("id").get_string() : "?",
+                                sendOKResponse(msg->connId, getMaybeEventId(arr[1]),
                                                false, std::string("error: ") + e.what());
                             }
                         } else if (cmd == "REQ" || cmd == "COUNT") {
@@ -117,9 +157,22 @@ void RelayServer::ingesterProcessEvent(lmdb::txn &txn, RelayServerCtx &rsctx, ui
     PROM_INC_EVENT_KIND(std::to_string(packed.kind()));
 
     {
-        // discard reposts that embed protected events
+        // Discard reposts that embed events with a protected ("-") tag.
         if (packed.kind() == 6 || packed.kind() == 16) {
-            if (origJson.at("content").get_string().find("[\"-\"]") != std::string::npos) {
+            bool foundProtectedInRepost = false;
+
+            try {
+                const auto &content = origJson.at("content").get_string();
+
+                if (startsWithJsonObject(content)) {
+                    auto embedded = tao::json::from_string(content);
+                    foundProtectedInRepost = eventJsonHasProtectedTag(embedded);
+                }
+            } catch (std::exception &) {
+                // If we can't parse embedded content, allow repost through for compatibility.
+            }
+
+            if (foundProtectedInRepost) {
                 auto idHex = to_hex(packed.id());
                 LI << "Repost embedded a protected event, blocking: " << idHex;
                 sendOKResponse(connId, idHex, false, "blocked: reposts can't embed protected events");
@@ -244,7 +297,7 @@ static std::string normalizeRelayUrl(std::string_view url) {
 }
 
 void RelayServer::ingesterProcessAuth(RelayServerCtx &rsctx, uint64_t connId, const tao::json::value &eventJson) {
-    if (cfg().relay__auth__serviceUrl.empty()) throw herr("relay needs serviceUrl to be configured before AUTH can work");
+    if (!cfg().relay__auth__enabled || cfg().relay__auth__serviceUrl.empty()) throw herr("AUTH not supported by this relay");
 
     std::string packedStr, jsonStr;
     parseAndVerifyEvent(eventJson, rsctx.secpCtx, true, true, packedStr, jsonStr);

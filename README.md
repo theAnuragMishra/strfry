@@ -107,7 +107,10 @@ However, in addition to `db` these are commonly used config parameters:
 
 * `relay.bind`: By default it only listens for connections from localhost. This is fine during development and testing, or if you are putting a reverse proxy in front of strfry, but if you want the outside world to connect directly to your relay, you should change this to `0.0.0.0` (which means any IP can connect).
 * `relay.port`: By default this is `7777`, but you may want to listen on a different port.
-* `relay.auth.serviceUrl`: This is the external address of your relay to the outside world. It must be set for NIP-42 AUTH to work, typically something like `wss://my-relay.com`.
+* `relay.auth.enabled` and `relay.auth.serviceUrl`: Both must be configured for NIP-42 AUTH support to be advertised. `serviceUrl` is the external address of your relay (typically something like `wss://my-relay.com`).
+* `relay.maxFilterLimitCount`: If set to `0`, the COUNT command is disabled and NIP-45 is not advertised in NIP-11.
+* `relay.negentropy.enabled`: If set to `false`, negentropy is disabled and NIP-77 is not advertised in NIP-11.
+* `relay.info.nips`: Optional JSON array override for the advertised NIP list in NIP-11. This replaces the computed defaults. Example: `"[1,2,11]"`.
 * `relay.info.name`, `relay.info.description`, etc: These are shown in the NIP-11 output and the HTML landing page served by strfry. They provide users extra information about who runs this relay, and its policies.
 
 ### Selecting and Deleting Events

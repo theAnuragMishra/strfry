@@ -67,7 +67,27 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
         try {
             auto parsed = tao::json::from_string(cfg().relay__info__nips);
             if (!parsed.is_array()) throw herr("not an array");
-            output = parsed;
+
+            std::vector<uint64_t> customNips;
+            customNips.reserve(parsed.get_array().size());
+
+            for (const auto &v : parsed.get_array()) {
+                if (v.is_unsigned()) {
+                    customNips.push_back(v.get_unsigned());
+                } else if (v.is_signed()) {
+                    auto val = v.get_signed();
+                    if (val < 0) throw herr("negative NIP value");
+                    customNips.push_back((uint64_t)val);
+                } else {
+                    throw herr("contains non-integer NIP value");
+                }
+            }
+
+            std::sort(customNips.begin(), customNips.end());
+            customNips.erase(std::unique(customNips.begin(), customNips.end()), customNips.end());
+
+            output = tao::json::value::array({});
+            for (auto n : customNips) output.push_back(n);
         } catch (std::exception &e) {
             LE << "Unable to parse config param relay.info.nips, using default: " << e.what();
         }

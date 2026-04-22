@@ -207,24 +207,28 @@ void RelayServer::runNegentropy(ThreadPool<MsgNegentropy>::Thread &thr) {
                 LI << "[" << connId << "] negentropy NEW session=" << subId.sv() << " bytesIn=" << msg->negPayload.size() << " tree=" << (treeId ? std::to_string(*treeId) : "NONE");
 
                 if (treeId) {
-                    negentropy::storage::BTreeLMDB storage(txn, negentropyDbi, *treeId);
-
                     const auto &f = msg->sub.filterGroup.filters.at(0);
-                    negentropy::storage::SubRange subStorage(storage, negentropy::Bound(f.since), negentropy::Bound(f.until == MAX_U64 ? MAX_U64 : f.until + 1));
-                    handleReconcile(connId, subId, subStorage, msg->negPayload);
+                    auto since = f.since;
+                    auto until = f.until;
 
                     if (!views.addStatelessView(connId, subId, std::move(msg->sub), *treeId)) {
-                        queries.removeSub(connId, subId);
                         sendNoticeError(connId, std::string("too many concurrent NEG requests"));
+                        continue;
                     }
+
+                    negentropy::storage::BTreeLMDB storage(txn, negentropyDbi, *treeId);
+                    negentropy::storage::SubRange subStorage(storage, negentropy::Bound(since), negentropy::Bound(until == MAX_U64 ? MAX_U64 : until + 1));
+                    handleReconcile(connId, subId, subStorage, msg->negPayload);
                 } else {
                     if (!queries.addSub(txn, std::move(msg->sub))) {
-                        sendNoticeError(connId, std::string("too many concurrent REQs"));
+                        sendNoticeError(connId, std::string("too many concurrent NEG requests"));
+                        continue;
                     }
 
                     if (!views.addMemoryView(connId, subId, msg->negPayload)) {
                         queries.removeSub(connId, subId);
                         sendNoticeError(connId, std::string("too many concurrent NEG requests"));
+                        continue;
                     }
 
                     queries.process(txn);

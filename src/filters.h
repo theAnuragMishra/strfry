@@ -300,6 +300,7 @@ struct FilterValidator {
     flat_hash_set<uint64_t> allowedKinds;
 
     void setupValidator() {
+        configVer = cfg().version();
         allowedKinds.clear();
 
         std::string allowedKindsStr = cfg().relay__filterValidation__allowedKinds;
